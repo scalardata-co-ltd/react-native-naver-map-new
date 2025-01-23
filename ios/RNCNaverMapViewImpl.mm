@@ -34,6 +34,7 @@
 - (instancetype)initWithFrame:(CGRect)frame {
   if (self = [super initWithFrame:frame]) {
     _reactSubviews = [NSMutableArray new];
+    self.showZoomControls = NO;
 
     [self.mapView addCameraDelegate:self];
     [self.mapView setTouchDelegate:self];
