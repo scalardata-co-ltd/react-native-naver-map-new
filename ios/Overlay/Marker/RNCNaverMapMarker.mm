@@ -22,7 +22,6 @@ static NSCache<NSString*, NMFOverlayImage*>* _imageCache;
   RNCNaverMapImageCanceller _imageCanceller;
   BOOL _isImageSetFromSubview;
   BOOL _isLoadingImage;
-  BOOL _isInitialized;
 }
 
 - (RCTBridge*)bridge {
@@ -56,19 +55,11 @@ static NSCache<NSString*, NMFOverlayImage*>* _imageCache;
     _inner = [NMFMarker new];
     _isImageSetFromSubview = NO;
     _isLoadingImage = NO;
-    _isInitialized = NO;
     
     [self setupTouchHandler];
   }
   return self;
 }
-
-#ifdef RCT_NEW_ARCH_ENABLED
-- (void)prepareForRecycle {
-  [super prepareForRecycle];
-  _isInitialized = YES;
-}
-#endif
 
 - (instancetype)initWithFrame:(CGRect)frame {
   if (self = [super initWithFrame:frame]) {
@@ -150,14 +141,6 @@ static NSCache<NSString*, NMFOverlayImage*>* _imageCache;
 
 - (void)loadImageWithRetry:(facebook::react::RNCNaverMapMarkerImageStruct)image
                retryCount:(NSInteger)currentRetry {
-  if (!_isInitialized) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
-                  dispatch_get_main_queue(), ^{
-      [self loadImageWithRetry:image retryCount:currentRetry];
-    });
-    return;
-  }
-  
   if (!self.inner) {
     NSLog(@"[RNCNaverMapMarker] Failed to load image - inner is null");
     return;
@@ -179,7 +162,7 @@ static NSCache<NSString*, NMFOverlayImage*>* _imageCache;
     _imageCanceller = nmap::getImage([self bridge], image, ^(NMFOverlayImage* _Nullable loadedImage) {
     dispatch_async(dispatch_get_main_queue(), ^{
       RNCNaverMapMarker *strongSelf = weakSelf;
-      if (!strongSelf || !strongSelf->_isLoadingImage || !strongSelf->_isInitialized) {
+      if (!strongSelf || !strongSelf->_isLoadingImage) {
         return;
       }
       
@@ -214,7 +197,7 @@ static NSCache<NSString*, NMFOverlayImage*>* _imageCache;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRetryDelay * NSEC_PER_SEC)),
                 dispatch_get_main_queue(), ^{
     RNCNaverMapMarker *strongSelf = weakSelf;
-    if (strongSelf && strongSelf->_isLoadingImage && strongSelf->_isInitialized) {
+    if (strongSelf && strongSelf->_isLoadingImage) {
       [strongSelf loadImageWithRetry:image retryCount:currentRetry + 1];
     }
   });
