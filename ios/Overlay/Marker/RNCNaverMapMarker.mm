@@ -14,17 +14,35 @@ using namespace facebook::react;
 @end
 #endif
 
+static const NSInteger kMaxImageLoadRetries = 2;
+static const NSTimeInterval kRetryDelay = 0.5;
+static NSCache<NSString*, NMFOverlayImage*>* _imageCache;
+
 @implementation RNCNaverMapMarker {
   RNCNaverMapImageCanceller _imageCanceller;
   BOOL _isImageSetFromSubview;
-}
-
-+ (bool)shouldBeRecycled {
-  return NO;
+  BOOL _isLoadingImage;
+  BOOL _isInitialized;
 }
 
 - (RCTBridge*)bridge {
   return [RCTBridge currentBridge];
+}
+
++ (void)initialize {
+  if (self == [RNCNaverMapMarker class]) {
+    _imageCache = [[NSCache alloc] init];
+    _imageCache.countLimit = 200; // 캐시 크기 설정
+  }
+
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                          selector:@selector(clearImageCache)
+                                              name:UIApplicationDidReceiveMemoryWarningNotification
+                                            object:nil];
+}
+
++ (BOOL)shouldBeRecycled {
+  return NO;
 }
 
 - (std::shared_ptr<RNCNaverMapMarkerEventEmitter const>)emitter {
@@ -37,10 +55,20 @@ using namespace facebook::react;
   if ((self = [super init])) {
     _inner = [NMFMarker new];
     _isImageSetFromSubview = NO;
+    _isLoadingImage = NO;
+    _isInitialized = NO;
+    
     [self setupTouchHandler];
   }
   return self;
 }
+
+#ifdef RCT_NEW_ARCH_ENABLED
+- (void)prepareForRecycle {
+  [super prepareForRecycle];
+  _isInitialized = YES;
+}
+#endif
 
 - (instancetype)initWithFrame:(CGRect)frame {
   if (self = [super initWithFrame:frame]) {
@@ -58,28 +86,44 @@ using namespace facebook::react;
   }
 }
 
+- (NSString*)createCacheKeyForImage:(facebook::react::RNCNaverMapMarkerImageStruct)image {
+  NSMutableString* key = [NSMutableString string];
+  
+  if (!image.symbol.empty()) {
+    [key appendFormat:@"%s_", image.symbol.c_str()];
+  }
+  if (!image.rnAssetUri.empty()) {
+    [key appendFormat:@"%s_", image.rnAssetUri.c_str()];
+  }
+  if (!image.httpUri.empty()) {
+    [key appendFormat:@"%s_", image.httpUri.c_str()];
+  }
+  if (!image.assetName.empty()) {
+    [key appendFormat:@"%s_", image.assetName.c_str()];
+  }
+  if (!image.reuseIdentifier.empty()) {
+    [key appendFormat:@"%s", image.reuseIdentifier.c_str()];
+  }
+  
+  if (key.length == 0) {
+    [key appendString:@"default_marker"];
+  }
+  
+  return key;
+}
+
 - (void)setImage:(facebook::react::RNCNaverMapMarkerImageStruct)image {
   _image = image;
-  // If subview exists for custom marker, then skip image
   if (_isImageSetFromSubview) {
     return;
   }
 
-  // Cancel pending request
   if (_imageCanceller) {
     _imageCanceller();
     _imageCanceller = nil;
   }
-
-  _imageCanceller = nmap::getImage([self bridge], image, ^(NMFOverlayImage* _Nullable image) {
-    dispatch_async(dispatch_get_main_queue(), [self, image]() {
-      if (self.inner) {
-        self.inner.iconImage = image;
-        [self setupTouchHandler];
-      }
-      self->_imageCanceller = nil;
-    });
-  });
+    
+  [self loadImageWithRetry:image retryCount:0];
 }
 
 - (void)setupTouchHandler {
@@ -102,6 +146,78 @@ using namespace facebook::react;
     
     return YES;
   };
+}
+
+- (void)loadImageWithRetry:(facebook::react::RNCNaverMapMarkerImageStruct)image
+               retryCount:(NSInteger)currentRetry {
+  if (!_isInitialized) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+                  dispatch_get_main_queue(), ^{
+      [self loadImageWithRetry:image retryCount:currentRetry];
+    });
+    return;
+  }
+  
+  if (!self.inner) {
+    NSLog(@"[RNCNaverMapMarker] Failed to load image - inner is null");
+    return;
+  }
+    
+  NSString* cacheKey = [self createCacheKeyForImage:image];
+  
+  NMFOverlayImage* cachedImage = [_imageCache objectForKey:cacheKey];
+  if (cachedImage) {
+    self.inner.iconImage = cachedImage;
+    self.inner.hidden = NO;
+    [self setupTouchHandler];
+    return;
+  }
+  
+  _isLoadingImage = YES;
+  
+  __weak RNCNaverMapMarker *weakSelf = self;
+    _imageCanceller = nmap::getImage([self bridge], image, ^(NMFOverlayImage* _Nullable loadedImage) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      RNCNaverMapMarker *strongSelf = weakSelf;
+      if (!strongSelf || !strongSelf->_isLoadingImage || !strongSelf->_isInitialized) {
+        return;
+      }
+      
+      if (loadedImage) {
+        [_imageCache setObject:loadedImage forKey:cacheKey];
+        [strongSelf setupTouchHandler];
+        strongSelf.inner.iconImage = loadedImage;
+        strongSelf.inner.hidden = NO;
+        NSLog(@"Marker image loaded successfully");
+      } else {
+        if (currentRetry < kMaxImageLoadRetries) {
+          NSLog(@"Marker image load failed, retrying... (%ld/%ld)",
+                (long)currentRetry + 1, (long)kMaxImageLoadRetries);
+          [strongSelf scheduleRetry:image retryCount:currentRetry];
+        } else {
+          NSLog(@"Marker image load failed after %ld retries", (long)kMaxImageLoadRetries);
+          if (strongSelf.inner) {
+            strongSelf.inner.hidden = YES;
+          }
+        }
+      }
+      
+      strongSelf->_isLoadingImage = NO;
+      strongSelf->_imageCanceller = nil;
+    });
+  });
+}
+
+- (void)scheduleRetry:(facebook::react::RNCNaverMapMarkerImageStruct)image
+           retryCount:(NSInteger)currentRetry {
+  __weak RNCNaverMapMarker *weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRetryDelay * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+    RNCNaverMapMarker *strongSelf = weakSelf;
+    if (strongSelf && strongSelf->_isLoadingImage && strongSelf->_isInitialized) {
+      [strongSelf loadImageWithRetry:image retryCount:currentRetry + 1];
+    }
+  });
 }
 
 #pragma clang diagnostic push
@@ -144,6 +260,10 @@ using namespace facebook::react;
         [view.layer renderInContext:rendererContext.CGContext];
       }];
   return ret;
+}
+
++ (void)clearImageCache {
+  [_imageCache removeAllObjects];
 }
 
 #pragma clang diagnostic pop
@@ -225,7 +345,6 @@ using namespace facebook::react;
   }
 
   [self setupTouchHandler];
-
   [super updateProps:props oldProps:oldProps];
 }
 
