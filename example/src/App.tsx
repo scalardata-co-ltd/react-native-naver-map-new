@@ -31,13 +31,9 @@ import {
 } from 'react-native-permissions';
 import { generateArray, formatJson } from '@mj-studio/js-util';
 import { getCitiesByRegion, type City } from './db/CityDatabase';
-
-// const jejuRegion: Region = {
-//   latitude: 33.20530773,
-//   longitude: 126.14656715029,
-//   latitudeDelta: 0.38,
-//   longitudeDelta: 0.8,
-// };
+import StationMarker from './component/StationMarkers';
+import type { StationInfo } from './component/StationMarkers';
+import { generateMockStationData } from './utils/makeCoordinates';
 
 const Cameras = {
   Seolleung: {
@@ -91,10 +87,12 @@ const MapTypes = [
   'None',
 ] satisfies MapType[];
 
+const firstRenderMockDataNumber = 50;
+
 export default function App() {
   const ref = useRef<NaverMapViewRef>(null);
 
-  const [camera, setCamera] = useState(Cameras.Jeju);
+  const [camera, setCamera] = useState(Cameras.Gangnam);
 
   const [nightMode, setNightMode] = useState(false);
   const [indoor, setIndoor] = useState(false);
@@ -311,6 +309,42 @@ export default function App() {
   const [cities, setCities] = useState<City[]>([]);
   const [, startTransition] = useTransition();
 
+  const [mockStations, setMockStations] = useState<StationInfo[]>([]);
+
+  const handleCameraChanged = (params: Camera & { region: Region }) => {
+    const newMocks = generateMockStationData(
+      params.latitude,
+      params.longitude,
+      500,
+      firstRenderMockDataNumber
+    );
+
+    setMockStations([
+      ...mockStations.slice(0, firstRenderMockDataNumber),
+      ...newMocks,
+    ]);
+  };
+
+  const handlePressMarker = (point: StationInfo) => () => {
+    console.log('Press marker:', point);
+  };
+
+  const renderCustomMarker = (marker: StationInfo, key: string) => {
+    return (
+      <NaverMapMarkerOverlay
+        key={key}
+        latitude={Number(marker.latitude)}
+        longitude={Number(marker.longitude)}
+        onTap={handlePressMarker(marker)}
+        width={100}
+        height={100}
+        // zIndex={selectedMarker?.key === singleMarkerData?.es_key ? 1 : 0}
+      >
+        <StationMarker isSelected={false} data={marker} />
+      </NaverMapMarkerOverlay>
+    );
+  };
+
   return (
     <View
       style={{
@@ -356,9 +390,7 @@ export default function App() {
               setCities(cities);
             });
           }}
-          onCameraIdle={() => {
-            // console.log('idle', region);
-          }}
+          onCameraIdle={handleCameraChanged}
           onTapMap={(args) => console.log(`Map Tapped: ${formatJson(args)}`)}
           clusters={clusters}
           // locationOverlay={{
@@ -384,6 +416,9 @@ export default function App() {
               height={1}
             />
           ))}
+          {mockStations.map((station, i) =>
+            renderCustomMarker(station, `${i}-testStations`)
+          )}
         </NaverMapView>
       ) : (
         <View style={{ flex: 1 }} />
