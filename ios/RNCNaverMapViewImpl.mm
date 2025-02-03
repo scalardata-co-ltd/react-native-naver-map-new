@@ -69,8 +69,12 @@
   // Our desired API is to pass up markers/overlays as children to the mapview component.
   // This is where we intercept them and do the appropriate underlying mapview action.
   if ([subview isKindOfClass:[RNCNaverMapMarker class]]) {
-    auto marker = static_cast<RNCNaverMapMarker*>(subview).inner;
-    marker.mapView = self.mapView;
+    RNCNaverMapMarker *marker = (RNCNaverMapMarker*)subview;
+    if (marker && marker.inner) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        marker.inner.mapView = self.mapView;
+      });
+    }
   } else if ([subview isKindOfClass:[RNCNaverMapCircle class]]) {
     auto marker = static_cast<RNCNaverMapCircle*>(subview).inner;
     marker.mapView = self.mapView;
