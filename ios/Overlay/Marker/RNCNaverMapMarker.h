@@ -28,4 +28,5 @@
 @interface RNCNaverMapMarker : RCTViewComponentView
 @property(nonatomic, strong) NMFMarker* inner;
 @property(nonatomic, assign) facebook::react::RNCNaverMapMarkerImageStruct image;
+- (NSString*)createCacheKeyForImage:(facebook::react::RNCNaverMapMarkerImageStruct)image;
 @end
