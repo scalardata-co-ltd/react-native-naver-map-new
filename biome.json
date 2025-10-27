@@ -9,7 +9,6 @@
     "ignoreUnknown": false,
     "includes": [
       "**/*.{js,ts,jsx,tsx}",
-      "!**/lib/**/*",
       "!**/node_modules/**/*",
       "!expo-config-plugin/build/**/*",
       "!**/docs/**/*",

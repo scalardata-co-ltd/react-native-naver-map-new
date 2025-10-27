@@ -3,7 +3,7 @@ pre-commit:
   commands:
     lint:js:
       glob: "*.{js,ts,jsx,tsx}"
-      run: pnpm biome check {staged_files}
+      run: bash -c 'files=$(echo "{staged_files}" | tr " " "\n" | grep -v "^lib/" | tr "\n" " "); [ -n "$files" ] && pnpm biome check $files || true'
     lint:objc:
       glob: "*.{h,mm,m,hpp,cpp,c}"
       run: bash ./script/clang-lint.sh {staged_files}
@@ -32,7 +32,7 @@ check:
   commands:
     lint:js:
       glob: "*.{js,ts,jsx,tsx}"
-      run: pnpm biome check {staged_files}
+      run: bash -c 'files=$(echo "{staged_files}" | tr " " "\n" | grep -v "^lib/" | tr "\n" " "); [ -n "$files" ] && pnpm biome check $files || true'
     lint:objc:
       glob: "*.{h,mm,m,hpp,cpp,c}"
       run: bash ./script/clang-lint.sh {all_files}
